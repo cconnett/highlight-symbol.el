@@ -135,7 +135,9 @@ disabled for all buffers."
 (make-variable-buffer-local 'highlight-symbol)
 
 (defvar highlight-symbol-list nil)
-(make-variable-buffer-local 'highlight-symbol-list)
+(defvar highlight-symbol-last-symbol nil)
+(defvar highlight-symbol-last-bounds nil)
+(defvar highlight-symbol-last-point nil)
 
 (defconst highlight-symbol-border-pattern
   (if (>= emacs-major-version 22) '("\\_<" . "\\_>") '("\\<" . "\\>")))
@@ -197,31 +199,53 @@ element in of `highlight-symbol-faces'."
         ;; remove
         (progn
           (setq highlight-symbol-list (delete symbol highlight-symbol-list))
-          (hi-lock-unface-buffer symbol))
+          (mapc (lambda (buffer)
+                  (set-buffer buffer)
+                  (hi-lock-unface-buffer symbol)
+                  )
+                (buffer-list))
+          )
       ;; add
       (when (equal symbol highlight-symbol)
         (highlight-symbol-mode-remove-temp))
-      (let ((color (nth highlight-symbol-color-index
-                        highlight-symbol-colors)))
-        (if color ;; wrap
-            (incf highlight-symbol-color-index)
-          (setq highlight-symbol-color-index 1
-                color (car highlight-symbol-colors)))
-        (setq color `((background-color . ,color)
-                      (foreground-color . "black")))
-        ;; highlight
-        (with-no-warnings
-          (if (< emacs-major-version 22)
-              (hi-lock-set-pattern `(,symbol (0 (quote ,color) t)))
-            (hi-lock-set-pattern symbol color)))
-        (push symbol highlight-symbol-list)))))
+      (mapc (lambda (buffer)
+              (set-buffer buffer)
+              (highlight-symbol-current-buffer symbol))
+            (buffer-list))
+      (push symbol highlight-symbol-list)
+      )))
+
+(defun highlight-symbol-current-buffer (symbol)
+  "Highlight SYMBOL in the current buffer."
+  (let* ((complete-saturation-alist
+          (let ((begin (car highlight-symbol-saturation-alist))
+                (end (car (last highlight-symbol-saturation-alist))))
+            (append `((,(- (car end) 1) ,(cadr end)))
+                    highlight-symbol-saturation-alist
+                    `((,(+ (car begin) 1) ,(cadr begin))))))
+
+         )
+
+    ;; highlight
+    (with-no-warnings
+      (if (< emacs-major-version 22)
+          (hi-lock-set-pattern `(,symbol (0 (quote ,color) t)))
+        (hi-lock-set-pattern symbol color)))
+    ))
 
 ;;;###autoload
 (defun highlight-symbol-remove-all ()
   "Remove symbol highlighting in all buffers."
   (interactive)
-  (mapc 'hi-lock-unface-buffer highlight-symbol-list)
-  (setq highlight-symbol-list nil))
+  (mapc (lambda (buffer)
+          (set-buffer buffer)
+          (mapc 'hi-lock-unface-buffer highlight-symbol-list)
+          )
+        (buffer-list)
+        )
+  (setq highlight-symbol-list nil)
+
+  )
 
 ;;;###autoload
 (defun highlight-symbol-next ()
@@ -269,6 +293,13 @@ element in of `highlight-symbol-faces'."
 (defun highlight-symbol-get-symbol ()
   "Return a regular expression dandifying the symbol at point."
   (let ((symbol (thing-at-point 'symbol)))
+    (if symbol
+        (progn
+          (setq highlight-symbol-last-symbol symbol)
+          (setq highlight-symbol-last-bounds (bounds-of-thing-at-point 'symbol))
+          (setq highlight-symbol-last-point (point))
+          )
+      (setq symbol highlight-symbol-last-symbol))
     (when symbol (concat (car highlight-symbol-border-pattern)
                          (regexp-quote symbol)
                          (cdr highlight-symbol-border-pattern)))))
@@ -303,12 +334,16 @@ create the new one."
 
 (defun highlight-symbol-jump (dir)
   "Jump to the next or previous occurence of the symbol at point.
-DIR has to be 1 or -1."
-  (let ((symbol (highlight-symbol-get-symbol)))
+DIR has to be 1 or -1 or 2 or -2."
+  (let ((symbol (if (equal (abs dir) 1)
+                    (highlight-symbol-get-symbol)
+                  highlight-symbol-last-symbol)))
     (if symbol
         (let* ((case-fold-search nil)
-               (bounds (bounds-of-thing-at-point 'symbol))
-               (offset (- (point) (if (< 0 dir) (cdr bounds) (car bounds)))))
+               (b (bounds-of-thing-at-point 'symbol))
+               (bounds (if b b highlight-symbol-last-bounds))
+               (point (if b (point) highlight-symbol-last-point))
+               (offset (- point (if (< 0 dir) (cdr bounds) (car bounds)))))
           (unless (eq last-command 'highlight-symbol-jump)
             (push-mark))
           ;; move a little, so we don't find the same instance again
@@ -324,3 +359,9 @@ DIR has to be 1 or -1."
 (provide 'highlight-symbol)
 
 ;;; highlight-symbol.el ends here
+
+(defun highlight-symbol-rehighlight-current-buffer ()
+  (interactive)
+  (mapc 'highlight-symbol-current-buffer highlight-symbol-list))
+
+(add-hook 'find-file-hook 'highlight-symbol-rehighlight-current-buffer)
