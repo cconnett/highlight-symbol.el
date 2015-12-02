@@ -126,7 +126,7 @@ disabled for all buffers."
   :group 'highlight-symbol)
 
 (defcustom highlight-symbol-on-navigation-p nil
-  "*Wether or not to temporary highlight the symbol when using
+  "*Whether or not to temporarily highlight the symbol when using
 `highlight-symbol-jump' family of functions."
   :type 'boolean
   :group 'highlight-symbol)
@@ -218,7 +218,7 @@ element in of `highlight-symbol-faces'."
 
 ;;;###autoload
 (defun highlight-symbol-remove-all ()
-  "Remove symbol highlighting in buffer."
+  "Remove symbol highlighting in all buffers."
   (interactive)
   (mapc 'hi-lock-unface-buffer highlight-symbol-list)
   (setq highlight-symbol-list nil))
@@ -253,7 +253,7 @@ element in of `highlight-symbol-faces'."
 
 ;;;###autoload
 (defun highlight-symbol-query-replace (replacement)
-  "*Replace the symbol at point."
+  "Replace the symbol at point with REPLACEMENT."
   (interactive (let ((symbol (or (thing-at-point 'symbol)
                                  (error "No symbol at point"))))
                  (highlight-symbol-temp-highlight)
