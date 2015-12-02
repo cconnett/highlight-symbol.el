@@ -83,6 +83,7 @@
 (require 'thingatpt)
 (require 'hi-lock)
 (eval-when-compile (require 'cl))
+(require 'hexrgb)
 
 (push "^No symbol at point$" debug-ignored-errors)
 
@@ -124,22 +125,11 @@ disabled for all buffers."
   :set 'highlight-symbol-set
   :group 'highlight-symbol)
 
-(defcustom highlight-symbol-colors
-  '("yellow" "DeepPink" "cyan" "MediumPurple1" "SpringGreen1"
-    "DarkOrange" "HotPink1" "RoyalBlue1" "OliveDrab")
-  "*Colors used by `highlight-symbol-at-point'.
-highlighting the symbols will use these colors in order."
-  :type '(repeat color)
-  :group 'highlight-symbol)
-
 (defcustom highlight-symbol-on-navigation-p nil
   "*Wether or not to temporary highlight the symbol when using
 `highlight-symbol-jump' family of functions."
   :type 'boolean
   :group 'highlight-symbol)
-
-(defvar highlight-symbol-color-index 0)
-(make-variable-buffer-local 'highlight-symbol-color-index)
 
 (defvar highlight-symbol nil)
 (make-variable-buffer-local 'highlight-symbol)
@@ -165,6 +155,34 @@ Highlighting takes place after `highlight-symbol-idle-delay'."
     (remove-hook 'post-command-hook 'highlight-symbol-mode-post-command t)
     (highlight-symbol-mode-remove-temp)
     (kill-local-variable 'highlight-symbol)))
+
+(defconst highlight-symbol-saturation-alist
+  (mapcar (lambda (pair) (list (/ (car pair) 360.0) (cadr pair)))
+          '(
+            (12 0.3) (13 0.8) (20 0.8) (25 0.75) (30 0.8) (35 0.9)
+            (60 0.8) (120 0.75) (125 0.75) (130 0.9) (140 1.0) (150 0.6)
+            (160 1.0) (170 0.8) (180 1.0) (210 0.4) (220 0.5) (230 0.45)
+            (240 0.35) (250 0.4) (260 0.55) (270 0.6) (290 0.7) (300 0.6)
+            (320 0.6) (330 0.5) (340 0.4)
+            ))
+  )
+
+(defun getcolor (symbol)
+  "Computes a background color for SYMBOL with a hash."
+  (let* (
+         (hue (/ (mod (sha1 symbol) 360) 360.0))
+         (bottom (find-if (lambda (item) (< hue (car item)))
+                          complete-saturation-alist :from-end))
+         (top    (find-if (lambda (item) (> hue (car item)))
+                          complete-saturation-alist))
+         (saturation (/ (+ (* (- hue (car bottom)) (cadr top))
+                           (* (- (car top) hue) (cadr bottom)))
+                        (- (car top) (car bottom))))
+         (color (hexrgb-hsv-to-hex
+                 hue saturation 1.0))
+         )
+    `((background-color . ,color)
+      (foreground-color . "black"))))
 
 ;;;###autoload
 (defun highlight-symbol-at-point ()
