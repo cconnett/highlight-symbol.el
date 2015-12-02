@@ -260,6 +260,18 @@ element in of `highlight-symbol-faces'."
   (highlight-symbol-jump -1))
 
 ;;;###autoload
+(defun highlight-symbol-next-force ()
+  "Jump to the next location of the symbol last jumped to / highlighted."
+  (interactive)
+  (highlight-symbol-jump 2))
+
+;;;###autoload
+(defun highlight-symbol-prev-force ()
+  "Jump to the previous location of the symbol last jumped to / highlighted."
+  (interactive)
+  (highlight-symbol-jump -2))
+
+;;;###autoload
 (defun highlight-symbol-next-in-defun ()
   "Jump to the next location of the symbol at point within the defun."
   (interactive)
