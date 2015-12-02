@@ -328,7 +328,6 @@ element in of `highlight-symbol-faces'."
   (if (eq t (car font-lock-keywords))
       (cadr font-lock-keywords)
     font-lock-keywords))
-=======
 
 (defun highlight-symbol-current-buffer (symbol)
   "Highlight SYMBOL in the current buffer."
@@ -337,7 +336,6 @@ element in of `highlight-symbol-faces'."
           (hi-lock-set-pattern `(,symbol (0 (quote ,color) t)))
         (hi-lock-set-pattern symbol color)))
     ))
->>>>>>> hash-coloring
 
 ;;;###autoload
 (defun highlight-symbol-remove-all ()
