@@ -119,6 +119,7 @@
 (defvar highlight-symbol-timer nil)
 
 (defun highlight-symbol-update-timer (value)
+  "Set the temporary timer to VALUE."
   (when highlight-symbol-timer
     (cancel-timer highlight-symbol-timer))
   (setq highlight-symbol-timer
