@@ -99,6 +99,7 @@
 
 (require 'thingatpt)
 (eval-when-compile (require 'cl))
+(require 'hexrgb)
 
 (push "^No symbol at point$" debug-ignored-errors)
 
@@ -147,17 +148,8 @@ more occurrences in this buffer."
   :type 'boolean
   :group 'highlight-symbol)
 
-(defcustom highlight-symbol-colors
-  '("yellow" "DeepPink" "cyan" "MediumPurple1" "SpringGreen1"
-    "DarkOrange" "HotPink1" "RoyalBlue1" "OliveDrab")
-  "Colors and/or faces used by `highlight-symbol'.
-highlighting the symbols will use these colors/faces in order."
-  :type '(repeat (choice color face))
-  :group 'highlight-symbol)
-
 (defcustom highlight-symbol-on-navigation-p nil
-  "Whether or not to temporarily highlight the symbol when using
-`highlight-symbol-jump' family of functions."
+  "Temporarily highlight the symbol when jump functions."
   :type 'boolean
   :group 'highlight-symbol)
 
@@ -166,14 +158,13 @@ highlighting the symbols will use these colors/faces in order."
   :type '(repeat string)
   :group 'highlight-symbol)
 
-(defvar highlight-symbol-color-index 0)
-(make-variable-buffer-local 'highlight-symbol-color-index)
-
 (defvar highlight-symbol nil)
 (make-variable-buffer-local 'highlight-symbol)
 
 (defvar highlight-symbol-list nil)
-(make-variable-buffer-local 'highlight-symbol-list)
+(defvar highlight-symbol-last-symbol nil)
+(defvar highlight-symbol-last-bounds nil)
+(defvar highlight-symbol-last-point nil)
 
 (defconst highlight-symbol-border-pattern
   (if (>= emacs-major-version 22) '("\\_<" . "\\_>") '("\\<" . "\\>")))
@@ -215,12 +206,46 @@ Highlighting takes place after `highlight-symbol-idle-delay'."
     (highlight-symbol-mode-remove-temp)
     (kill-local-variable 'highlight-symbol)))
 
+(defconst highlight-symbol-saturation-alist
+  (mapcar (lambda (pair) (list (/ (car pair) 360.0) (cadr pair)))
+          '(
+            (12 0.3) (13 0.8) (20 0.8) (25 0.75) (30 0.8) (35 0.9)
+            (60 0.8) (120 0.75) (125 0.75) (130 0.9) (140 1.0) (150 0.6)
+            (160 1.0) (170 0.8) (180 1.0) (210 0.4) (220 0.5) (230 0.45)
+            (240 0.35) (250 0.4) (260 0.55) (270 0.6) (290 0.7) (300 0.6)
+            (320 0.6) (330 0.5) (340 0.4)
+            ))
+  )
+
+(defun getcolor (symbol)
+  "Computes a background color for SYMBOL with a hash."
+  (let (
+        (begin (car highlight-symbol-saturation-alist))
+        (end (car (last highlight-symbol-saturation-alist)))
+        (complete-saturation-alist
+         (append `((,(- (car end) 1) ,(cadr end)))
+                 highlight-symbol-saturation-alist
+                    `((,(+ (car begin) 1) ,(cadr begin)))))
+        (hue (/ (mod (sha1 symbol) 360) 360.0))
+        (bottom (find-if (lambda (item) (< hue (car item)))
+                         complete-saturation-alist :from-end))
+        (top    (find-if (lambda (item) (> hue (car item)))
+                         complete-saturation-alist))
+        (saturation (/ (+ (* (- hue (car bottom)) (cadr top))
+                          (* (- (car top) hue) (cadr bottom)))
+                       (- (car top) (car bottom))))
+        (color (hexrgb-hsv-to-hex
+                hue saturation 1.0))
+        )
+    `((background-color . ,color)
+      (foreground-color . "black"))))
+
 ;;;###autoload
 (defalias 'highlight-symbol-at-point 'highlight-symbol)
 
 ;;;###autoload
 (defun highlight-symbol (&optional symbol)
-  "Toggle highlighting of the symbol at point.
+  "Toggle highlighting of SYMBOL or the symbol at point.
 This highlights or unhighlights the symbol at point using the first
 element in of `highlight-symbol-faces'."
   (interactive)
@@ -234,7 +259,7 @@ element in of `highlight-symbol-faces'."
         (highlight-symbol-count symbol t)))))
 
 (defun highlight-symbol-symbol-highlighted-p (symbol)
-  "Test if the a symbol regexp is currently highlighted."
+  "Test if SYMBOL is currently highlighted."
   (member symbol highlight-symbol-list))
 
 (defun highlight-symbol-should-auto-highlight-p (symbol)
@@ -252,54 +277,90 @@ element in of `highlight-symbol-faces'."
             color (car highlight-symbol-colors)))
     color))
 
+(defun highlight-symbol-add-symbol-with-face (symbol face)
+  "Add a font-lock keyword for SYMBOL, giving it FACE."
+  (font-lock-add-keywords nil `((,symbol 0 ',face prepend)) 'append)
+  (highlight-symbol-flush))
+
+(defun highlight-symbol-add-symbol-current-buffer (symbol)
+  "Compute the color for SYMBOL and add a font-lock keyword in current buffer."
+  (let ((color (or color (getcolor symbol))))
+    (unless (facep color)
+      (setq color `((background-color . ,color)
+                    (foreground-color . ,highlight-symbol-foreground-color))))
+    (highlight-symbol-add-symbol-with-face symbol color)
+    ))
+
 (defun highlight-symbol-add-symbol (symbol &optional color)
+  "Highlight SYMBOL in COLOR in all buffers."
   (unless (highlight-symbol-symbol-highlighted-p symbol)
     (when (equal symbol highlight-symbol)
       (highlight-symbol-mode-remove-temp))
-    (let ((color (or color (highlight-symbol-next-color))))
-      (unless (facep color)
-        (setq color `((background-color . ,color)
-                      (foreground-color . ,highlight-symbol-foreground-color))))
-      ;; highlight
-      (highlight-symbol-add-symbol-with-face symbol color)
-      (push symbol highlight-symbol-list))))
+    (mapc (lambda (buffer)
+            (set-buffer buffer)
+            (highlight-symbol-add-symbol-current-buffer symbol))
+          (buffer-list))
+    (push symbol highlight-symbol-list)))
+
+(defun highlight-symbol-remove-symbol (symbol)
+  "Unhighlight SYMBOL in all buffers."
+  (setq highlight-symbol-list (delete symbol highlight-symbol-list))
+  (let ((keywords (assoc symbol (highlight-symbol-uncompiled-keywords))))
+    (mapc (lambda (buffer)
+            (set-buffer buffer)
+            (font-lock-remove-keywords nil (list keywords))
+            (highlight-symbol-flush)
+            )
+          (buffer-list))
+    ))
 
 (defun highlight-symbol-flush ()
+  "Flush font-lock if font-lock-flush available, else fontify-buffer."
   (if (fboundp 'font-lock-flush)
       (font-lock-flush)
     ;; Emacs < 25
     (with-no-warnings
       (font-lock-fontify-buffer))))
 
-(defun highlight-symbol-add-symbol-with-face (symbol face)
-  (font-lock-add-keywords nil `((,symbol 0 ',face prepend)) 'append)
-  (highlight-symbol-flush))
-
-(defun highlight-symbol-remove-symbol (symbol)
-  (setq highlight-symbol-list (delete symbol highlight-symbol-list))
-  (let ((keywords (assoc symbol (highlight-symbol-uncompiled-keywords))))
-    (font-lock-remove-keywords nil (list keywords))
-    (highlight-symbol-flush)))
-
 (defun highlight-symbol-uncompiled-keywords ()
+  "Gets the highlighted keywords in uncompiled form."
   (if (eq t (car font-lock-keywords))
       (cadr font-lock-keywords)
     font-lock-keywords))
+=======
+
+(defun highlight-symbol-current-buffer (symbol)
+  "Highlight SYMBOL in the current buffer."
+  (with-no-warnings
+    (if (< emacs-major-version 22)
+          (hi-lock-set-pattern `(,symbol (0 (quote ,color) t)))
+        (hi-lock-set-pattern symbol color)))
+    ))
+>>>>>>> hash-coloring
 
 ;;;###autoload
 (defun highlight-symbol-remove-all ()
-  "Remove symbol highlighting in buffer."
+  "Remove symbol highlighting in all buffers."
   (interactive)
-  (mapc 'highlight-symbol-remove-symbol highlight-symbol-list))
+  (mapc (lambda (buffer)
+          (set-buffer buffer)
+          (mapc 'hi-lock-unface-buffer highlight-symbol-list)
+          )
+        (buffer-list)
+        )
+  (setq highlight-symbol-list nil)
+
+  )
 
 ;;;###autoload
 (defun highlight-symbol-list-all ()
-  "List all symbols highlighted in the buffer."
+  "List all symbols highlighted."
   (interactive)
   (message "%s" (mapconcat 'highlight-symbol-fontify-symbol
                            highlight-symbol-list ", ")))
 
 (defun highlight-symbol-fontify-symbol (symbol)
+  "Fontify SYMBOL."
   (let ((prefix-length (length (car highlight-symbol-border-pattern)))
         (suffix-length (length (cdr highlight-symbol-border-pattern))))
     (propertize (substring symbol prefix-length
@@ -308,7 +369,7 @@ element in of `highlight-symbol-faces'."
 
 ;;;###autoload
 (defun highlight-symbol-count (&optional symbol message-p)
-  "Print the number of occurrences of symbol at point."
+  "Print the number of occurrences of SYMBOL at point, messaging if MESSAGE-P."
   (interactive '(nil t))
   (let* ((symbol (or symbol
                      (highlight-symbol-get-symbol)
@@ -334,6 +395,18 @@ element in of `highlight-symbol-faces'."
   "Jump to the previous location of the symbol at point within the buffer."
   (interactive)
   (highlight-symbol-jump -1))
+
+;;;###autoload
+(defun highlight-symbol-next-force ()
+  "Jump to the next location of the symbol last jumped to / highlighted."
+  (interactive)
+  (highlight-symbol-jump 2))
+
+;;;###autoload
+(defun highlight-symbol-prev-force ()
+  "Jump to the previous location of the symbol last jumped to / highlighted."
+  (interactive)
+  (highlight-symbol-jump -2))
 
 ;;;###autoload
 (defun highlight-symbol-next-in-defun ()
@@ -405,13 +478,19 @@ before if NLINES is negative."
 (defun highlight-symbol-get-symbol ()
   "Return a regular expression identifying the symbol at point."
   (let ((symbol (thing-at-point 'symbol)))
+    (if symbol
+        (progn
+          (setq highlight-symbol-last-symbol symbol)
+          (setq highlight-symbol-last-bounds (bounds-of-thing-at-point 'symbol))
+          (setq highlight-symbol-last-point (point))
+          )
+      (setq symbol highlight-symbol-last-symbol))
     (when (and symbol
                (not (member 0 (mapcar
                                (lambda (e) (string-match e symbol))
-                               highlight-symbol-ignore-list))))
-      (concat (car highlight-symbol-border-pattern)
-              (regexp-quote symbol)
-              (cdr highlight-symbol-border-pattern)))))
+                               highlight-symbol-ignore-list)))) (concat (car highlight-symbol-border-pattern)
+                                                                        (regexp-quote symbol)
+                                                                        (cdr highlight-symbol-border-pattern)))))
 
 (defun highlight-symbol-temp-highlight ()
   "Highlight the current symbol until a command is executed."
@@ -447,12 +526,16 @@ create the new one."
 
 (defun highlight-symbol-jump (dir)
   "Jump to the next or previous occurence of the symbol at point.
-DIR has to be 1 or -1."
-  (let ((symbol (highlight-symbol-get-symbol)))
+DIR has to be 1 or -1 or 2 or -2."
+  (let ((symbol (if (equal (abs dir) 1)
+                    (highlight-symbol-get-symbol)
+                  highlight-symbol-last-symbol)))
     (if symbol
         (let* ((case-fold-search nil)
                (msg (member 'navigation highlight-symbol-occurrence-message))
-               (bounds (bounds-of-thing-at-point 'symbol))
+               (b (bounds-of-thing-at-point 'symbol))
+               (bounds (if b b highlight-symbol-last-bounds))
+               (point (if b (point) highlight-symbol-last-point))
                (offset (- (point) (if (< 0 dir) (cdr bounds) (car bounds)))))
           (unless (eq last-command 'highlight-symbol-jump)
             (push-mark))
@@ -470,6 +553,13 @@ DIR has to be 1 or -1."
           (setq this-command 'highlight-symbol-jump))
       (error "No symbol at point"))))
 
-(provide 'highlight-symbol)
 
+(defun highlight-symbol-rehighlight-current-buffer ()
+  "Rehighlight all the symbols in the current buffer."
+  (interactive)
+  (mapc 'highlight-symbol-add-symbol-current-buffer highlight-symbol-list))
+
+(add-hook 'find-file-hook 'highlight-symbol-rehighlight-current-buffer)
+
+(provide 'highlight-symbol)
 ;;; highlight-symbol.el ends here
