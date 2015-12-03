@@ -3,8 +3,6 @@ highlight-symbol.el
 
 automatic and manual symbol highlighting for Emacs
 
-[![Build Status](https://travis-ci.org/nschum/highlight-symbol.el.png?branch=master)](https://travis-ci.org/nschum/highlight-symbol.el)
-
 Add the following to your .emacs file:
 
     (require 'highlight-symbol)
