@@ -220,26 +220,37 @@ Highlighting takes place after `highlight-symbol-idle-delay'."
 
 (defun getcolor (symbol)
   "Computes a background color for SYMBOL with a hash."
-  (let (
-        (begin (car highlight-symbol-saturation-alist))
-        (end (car (last highlight-symbol-saturation-alist)))
-        (complete-saturation-alist
-         (append `((,(- (car end) 1) ,(cadr end)))
-                 highlight-symbol-saturation-alist
-                    `((,(+ (car begin) 1) ,(cadr begin)))))
-        (hue (/ (mod (sha1 symbol) 360) 360.0))
-        (bottom (find-if (lambda (item) (< hue (car item)))
-                         complete-saturation-alist :from-end))
-        (top    (find-if (lambda (item) (> hue (car item)))
-                         complete-saturation-alist))
-        (saturation (/ (+ (* (- hue (car bottom)) (cadr top))
-                          (* (- (car top) hue) (cadr bottom)))
-                       (- (car top) (car bottom))))
-        (color (hexrgb-hsv-to-hex
-                hue saturation 1.0))
-        )
-    `((background-color . ,color)
-      (foreground-color . "black"))))
+  (let* ((begin (car highlight-symbol-saturation-alist))
+         (end (car (last highlight-symbol-saturation-alist)))
+         (complete-saturation-alist (append `((,(- (car end)
+                                                   1)
+                                               ,(cadr end)))
+                                            highlight-symbol-saturation-alist
+                                            `((,(+ (car begin)
+                                                   1)
+                                               ,(cadr begin)))))
+         (hue (/ (mod (string-to-number (substring (sha1 symbol)
+                                                   0
+                                                   8)
+                                        16)
+                      360)
+                 360.0))
+         (bottom (find-if (lambda (item)
+                            (< hue (car item)))
+                          complete-saturation-alist
+                          :from-end))
+         (top (find-if (lambda (item)
+                         (> hue (car item)))
+                       complete-saturation-alist))
+         (saturation (/ (+ (* (- hue
+                                 (car bottom))
+                              (cadr top))
+                           (* (- (car top)
+                                 hue)
+                              (cadr bottom)))
+                        (- (car top)
+                           (car bottom)))))
+    (hexrgb-hsv-to-hex hue saturation 1.0)))
 
 ;;;###autoload
 (defalias 'highlight-symbol-at-point 'highlight-symbol)
